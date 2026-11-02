@@ -15,7 +15,7 @@
 
 ## Custom Workflows
 
-- **"pesquisa PT"**: correr scan com foco Portugal (Landing.jobs + ATS com location Portugal/Lisboa/Porto); listar no máximo as 10 melhores para estágio/junior; uma linha por oferta com empresa, título, cidade e porquê.
+- **"pesquisa PT"**: correr `npm run scan:portugal` (Landing.jobs + OkEmprego + boards remotos filtrados a PT + links manuais LinkedIn/NetEmpregos/ITJobs). Listar no máximo as 10 melhores para estágio/junior; uma linha por oferta com empresa, título, cidade e porquê. LinkedIn nunca é feito scrape — só links de pesquisa.
 - **"avalia esta"**: quando o João cola um URL/JD — avaliar, arquivar JD, gerar relatório, atualizar tracker; verdicto claro no topo.
 - **"prepara candidatura"**: CV à medida + respostas curtas para formulário + (se pedir) email/carta; parar antes de submeter.
 

@@ -3405,6 +3405,14 @@ job_boards:
     enabled: true
     notes: "Europe-focused tech board — strong Lisbon/Porto coverage; filtered by location_filter to Portugal"
 
+  - name: OkEmprego Portugal IT
+    provider: okemprego
+    country: PT
+    category: it-data
+    max_pages: 3
+    enabled: true
+    notes: "Portugal-native public jobs API (no key). Also covered by npm run scan:portugal with estágio/junior queries."
+
   # ── Telegram channels (public) ─────────────────────────────────────
   # Public web preview at https://t.me/s/<channel>: no API key, no login.
   # 20 posts per page, walked back until since_days (default 30) or max_pages
