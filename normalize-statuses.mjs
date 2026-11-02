@@ -17,7 +17,7 @@ import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
   openTrackerTransaction, rebuildRow,
-  loadCanonicalStates, resolveCanonicalState,
+  loadCanonicalStates, resolveCanonicalState, resolveCanonicalStateId, statusTextAfterDate, prependNote,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow, splitTrackerCells, trackerRowSeparator } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -56,6 +56,9 @@ function canonicalStates() {
 }
 
 function normalizeStatus(raw) {
+  // A dated cell's state. Text after the date is no part of it, so the whole
+  // cell moves to Notes rather than losing those words.
+  const dated = (status) => (statusTextAfterDate(raw) ? { status, moveToNotes: raw.trim() } : { status });
   // Strip markdown bold
   let s = raw.replace(/\*\*/g, '').trim();
   const lower = s.toLowerCase();
@@ -77,10 +80,10 @@ function normalizeStatus(raw) {
   // form this comment claims to handle, that states.yml lists as an alias, and that
   // the header of this file names. A bare "Rechazado" fell through to unknown.
   if (/^rechazad[oa]$/i.test(s)) return { status: 'Rejected' };
-  if (/^rechazado\s+\d{4}/i.test(s)) return { status: 'Rejected' };
+  if (/^rechazado\s+\d{4}/i.test(s)) return dated('Rejected');
 
   // Aplicado with date → Applied (strip date)
-  if (/^aplicado\s+\d{4}/i.test(s)) return { status: 'Applied' };
+  if (/^aplicado\s+\d{4}/i.test(s)) return dated('Applied');
 
   // CONDICIONAL / HOLD / EVALUAR / Verificar → Evaluated
   if (/^(condicional|hold|evaluar|verificar)$/i.test(s)) return { status: 'Evaluated' };
@@ -114,6 +117,21 @@ function normalizeStatus(raw) {
   // makes that hold by construction instead of by remembering.
   const fromStates = resolveCanonicalState(lower, canonicalStates());
   if (fromStates) return { status: fromStates };
+
+  // A legacy cell with a date appended: `Applied 2026-01-02`,
+  // `**Interview** 2026-02-10`. Every reader resolves one through
+  // resolveCanonicalStateId(), which strips the bold and the date, and
+  // verify-pipeline's fix for "Status contains date" is to run this script.
+  // Only the two Spanish special cases above stripped a date, so every other
+  // dated cell was reported as unknown and left in place. Resolve it the way
+  // the readers do: the date goes, the state stays. Text after the date
+  // (`… 2026-01-02 via referral`) is not part of any state, so the cell is
+  // kept in Notes rather than dropped with it.
+  const datedId = resolveCanonicalStateId(raw, canonicalStates());
+  if (datedId) {
+    const status = canonicalStates().find(st => st.id.toLowerCase() === datedId).label;
+    return dated(status);
+  }
 
   // Unknown — flag it
   return { status: null, unknown: true };
@@ -206,7 +224,7 @@ for (let i = 0; i < lines.length; i++) {
   if (result.moveToNotes && COLS.notes != null) {
     const existing = parts[COLS.notes] || '';
     if (!existing.includes(result.moveToNotes)) {
-      parts[COLS.notes] = result.moveToNotes + (existing ? '. ' + existing : '');
+      parts[COLS.notes] = prependNote(existing, result.moveToNotes);
     }
   }
 
