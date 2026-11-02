@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings } from "lucide-react";
+import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 import { paramsToFilters, paramsToAi, type ExploreFilters } from "@/lib/explore";
 import { CHINA_PRESET } from "@/lib/employer-preset.mjs";
+import { PORTUGAL_PRESET } from "@/lib/portugal-preset.mjs";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
@@ -40,7 +41,7 @@ export function ExplorerView({
   evaluated: { n: string; company: string; role: string }[];
   rootExists: boolean;
 }) {
-  const { filters, setFilters, initFilters, phase, running, offers, discover, loadFresh, status, employerOutcome, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
+  const { filters, setFilters, initFilters, phase, running, offers, searchLinks, discover, loadFresh, status, employerOutcome, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
   const scanNote =
     companiesScanned > 0
       ? `Scanned ${companiesScanned.toLocaleString()}${companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} compan${companiesScanned === 1 ? "y" : "ies"}${partial ? " · some sources were unreachable" : ""}.`
@@ -82,7 +83,7 @@ export function ExplorerView({
       initFilters(sp.toString() ? paramsToFilters(sp) : seed.filters);
       // Onboarding hand-off: ?run=1 auto-fires the free scan + flags the first-run
       // banner (the "matches found from your CV, free" reveal).
-      if (sp.get("run") === "1" && sp.get("preset") !== CHINA_PRESET) {
+      if (sp.get("run") === "1" && sp.get("preset") !== CHINA_PRESET && sp.get("preset") !== PORTUGAL_PRESET) {
         setFirstRun(true);
         void discover();
       }
@@ -107,7 +108,8 @@ export function ExplorerView({
   const isAi = mode === "ai";
   const isResults = phase === "results";
   const employer = filters.preset === CHINA_PRESET;
-  const canDiscover = !running && (employer ? (filters.employers?.length ?? 0) > 0 : filters.ats.length > 0);
+  const portugal = filters.preset === PORTUGAL_PRESET;
+  const canDiscover = !running && (portugal || (employer ? (filters.employers?.length ?? 0) > 0 : filters.ats.length > 0));
   const scanRunning = running && !isAi && !employer;
   // Keep one ResultsList mounted across scanning → revealing → results so
   // filter/sort/scroll and co-rise survive the 850ms reveal handoff.
@@ -136,7 +138,11 @@ export function ExplorerView({
           <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-muted">
             {isAi
               ? "Describe the role in plain language — an AI hunts the open web for it, on your own AI. Candidates are unverified until you evaluate."
-              : employer ? "Scan selected employer sites using your role and location terms, zero tokens. Open an original JD to check its details." : "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one."}
+              : portugal
+                ? "Pesquisa vagas em Portugal em vários sites (Landing.jobs, OkEmprego…). Os resultados aparecem aqui — sem terminal. LinkedIn só como links manuais."
+                : employer
+                  ? "Scan selected employer sites using your role and location terms, zero tokens. Open an original JD to check its details."
+                  : "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one."}
           </p>
         )}
       </header>
@@ -184,7 +190,7 @@ export function ExplorerView({
               {refineOpen && (
                 <div className="space-y-4 border-t border-border p-4">
                   <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} disabled={running} />
-                  <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Re-cast (free)" filters={filters} />
+                  <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label={portugal ? "Pesquisar Portugal" : "Re-cast (free)"} filters={filters} />
                 </div>
               )}
             </div>
@@ -192,7 +198,7 @@ export function ExplorerView({
             <div className="mb-6 rounded-2xl border border-border bg-surface/30 p-5">
               <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} disabled={running} />
               <div className="mt-5">
-                <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Discover (free)" filters={filters} />
+                <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label={portugal ? "Pesquisar Portugal" : "Discover (free)"} filters={filters} />
               </div>
             </div>
           )}
@@ -216,6 +222,28 @@ export function ExplorerView({
 
       {showScanList && (
         <div className={scanRunning ? "relative z-[1] mx-auto max-w-5xl px-5 pb-10 md:px-8" : undefined}>
+          {portugal && searchLinks.length > 0 && !scanRunning && (
+            <div className="mb-4 rounded-xl border border-border bg-surface/40 px-4 py-3">
+              <p className="text-[13px] font-medium text-foreground">Links manuais (abrir no browser)</p>
+              <p className="mt-0.5 text-[11px] text-faint">LinkedIn / NetEmpregos / ITJobs não são lidos automaticamente — só estes atalhos.</p>
+              <ul className="mt-2 flex flex-wrap gap-2">
+                {searchLinks.map((link) => (
+                  <li key={link.url}>
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/60 px-2.5 py-1.5 text-[12px] font-medium text-foreground transition-colors hover:border-brand/40 hover:text-brand-text"
+                      title={link.note}
+                    >
+                      <ExternalLink className="size-3.5 opacity-70" />
+                      {link.name}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <ResultsList offers={enriched} />
         </div>
       )}
@@ -273,13 +301,19 @@ function DiscoverBar({ canDiscover, onDiscover, label, filters }: { canDiscover:
         type="button"
         disabled={!canDiscover && !running}
         aria-disabled={!canDiscover}
-        aria-describedby={filters.preset === CHINA_PRESET ? "employer-selection" : undefined}
+        aria-describedby={
+          filters.preset === CHINA_PRESET
+            ? "employer-selection"
+            : filters.preset === PORTUGAL_PRESET
+              ? "portugal-scope"
+              : undefined
+        }
         onClick={() => { if (canDiscover) onDiscover(); }}
         className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50 max-sm:min-h-[44px]"
       >
         <Compass className="size-4" /> {label}
       </button>
-      {filters.preset !== CHINA_PRESET && <ScheduleJobAction filters={filters} />}
+      {filters.preset !== CHINA_PRESET && filters.preset !== PORTUGAL_PRESET && <ScheduleJobAction filters={filters} />}
       <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
         <span className="size-1.5 rounded-full bg-emerald-500" />
         Evaluating a role later costs tokens. Discovering never does.

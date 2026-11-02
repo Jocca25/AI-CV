@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { DEFAULT_FILTERS, cleanChips, type ExploreFilters } from "@/lib/explore";
+import { PORTUGAL_PRESET } from "@/lib/portugal-preset.mjs";
 import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 
@@ -92,6 +93,13 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
       filters.positive = fromRoles;
       seededFrom.push("profile.yml");
     }
+  }
+
+  // Portugal-focused location filters → default Explore to the Portugal boards
+  // preset (Landing.jobs / OkEmprego / …) so the user lands on "Pesquisar Portugal".
+  const locHint = [...filters.allow, ...filters.alwaysAllow].join(" ").toLowerCase();
+  if (/\bportugal\b|\blisboa\b|\blisbon\b|\bporto\b/.test(locHint)) {
+    filters.preset = PORTUGAL_PRESET;
   }
 
   return { filters, seededFrom };
