@@ -272,12 +272,32 @@ export function formatPortugalReport({
   return lines.join('\n');
 }
 
-async function main(args = process.argv.slice(2)) {
-  const dryRun = hasFlag(args, '--dry-run');
-  const toPipeline = hasFlag(args, '--pipeline');
-  const jsonMode = hasFlag(args, '--json');
-  const limitRaw = flagValue(args, '--limit');
-  const limit = limitRaw ? Math.max(1, parseInt(limitRaw, 10) || 80) : 80;
+/**
+ * Programmatic Portugal multi-site scan (also used by the web Explore UI).
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.limit=80]
+ * @param {boolean} [opts.writeFiles=false] - write output/portugal-jobs-*.{md,json}
+ * @param {boolean} [opts.toPipeline=false] - append admitted jobs to data/pipeline.md
+ * @param {boolean} [opts.quiet=false]
+ * @param {(ev: {kind: string, source?: string, count?: number, message?: string}) => void} [opts.onProgress]
+ * @param {AbortSignal} [opts.signal]
+ */
+export async function runPortugalScan(opts = {}) {
+  const limit = Number.isInteger(opts.limit) && opts.limit > 0 ? opts.limit : 80;
+  const writeFiles = opts.writeFiles === true;
+  const toPipeline = opts.toPipeline === true;
+  const quiet = opts.quiet === true;
+  const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
+  const signal = opts.signal;
+
+  const throwIfAborted = () => {
+    if (signal?.aborted) {
+      const err = new Error('Portugal scan aborted');
+      err.name = 'AbortError';
+      throw err;
+    }
+  };
 
   const portals = loadPortals();
   const gate = createAdmissionGate({ config: portals });
@@ -289,28 +309,35 @@ async function main(args = process.argv.slice(2)) {
   const fetchedBySource = {};
 
   const log = (...a) => {
-    if (!jsonMode) console.log(...a);
+    if (!quiet) console.log(...a);
   };
 
   log('🇵🇹  Scan Portugal — a procurar vagas em vários sites…\n');
+  throwIfAborted();
 
   /** @type {any[]} */
   let raw = [];
 
   // Landing.jobs
   {
+    onProgress({ kind: 'sourceStart', source: 'landingjobs' });
     const jobs = await fetchSource('landingjobs', landingjobs, { name: 'Landing.jobs' }, ctx, errors);
+    throwIfAborted();
     fetchedBySource.landingjobs = jobs.length;
     raw.push(...jobs);
+    onProgress({ kind: 'sourceDone', source: 'landingjobs', count: jobs.length });
     log(`  Landing.jobs: ${jobs.length} vagas`);
   }
 
   // OkEmprego — Portugal-native API (two complementary queries, deduped later)
   for (const entry of OK_EMPREGO_QUERIES) {
+    onProgress({ kind: 'sourceStart', source: 'okemprego' });
     const jobs = await fetchSource(`okemprego:${entry.name}`, okemprego, entry, ctx, errors);
+    throwIfAborted();
     const key = entry.name;
     fetchedBySource[key] = jobs.length;
     raw.push(...jobs.map(j => ({ ...j, source: 'okemprego' })));
+    onProgress({ kind: 'sourceDone', source: 'okemprego', count: jobs.length });
     log(`  ${entry.name}: ${jobs.length} vagas`);
   }
 
@@ -321,9 +348,12 @@ async function main(args = process.argv.slice(2)) {
     ['remotive', remotive, { name: 'Remotive' }],
     ['himalayas', himalayas, { name: 'Himalayas', max_pages: 2 }],
   ]) {
+    onProgress({ kind: 'sourceStart', source: /** @type {string} */ (id) });
     const jobs = await fetchSource(/** @type {string} */ (id), /** @type {any} */ (provider), entry, ctx, errors);
+    throwIfAborted();
     fetchedBySource[/** @type {string} */ (id)] = jobs.length;
     raw.push(...jobs);
+    onProgress({ kind: 'sourceDone', source: /** @type {string} */ (id), count: jobs.length });
     log(`  ${id}: ${jobs.length} vagas`);
   }
 
@@ -347,22 +377,11 @@ async function main(args = process.argv.slice(2)) {
   const webQueries = portugalSearchQueries(portals);
   const skippedLabel = formatSkipCounts(gate.counts);
 
-  let pipelineAdded = null;
   const outBase = `portugal-jobs-${today}`;
   const mdPath = path.join(OUTPUT_DIR, `${outBase}.md`);
   const jsonPath = path.join(OUTPUT_DIR, `${outBase}.json`);
 
-  const reportMd = formatPortugalReport({
-    date: today,
-    admitted: listed,
-    skippedLabel,
-    fetchedBySource,
-    errors,
-    searchLinks,
-    webQueries,
-    pipelineAdded: toPipeline && !dryRun ? listed.length : null,
-  });
-
+  /** @type {any} */
   const reportJson = {
     date: today,
     admitted: listed.length,
@@ -381,11 +400,21 @@ async function main(args = process.argv.slice(2)) {
       source: j.source,
       postedAt: j.postedAt ?? null,
     })),
-    files: dryRun ? null : { markdown: mdPath, json: jsonPath },
+    files: writeFiles ? { markdown: mdPath, json: jsonPath } : null,
     pipeline: false,
   };
 
-  if (!dryRun) {
+  if (writeFiles) {
+    const reportMd = formatPortugalReport({
+      date: today,
+      admitted: listed,
+      skippedLabel,
+      fetchedBySource,
+      errors,
+      searchLinks,
+      webQueries,
+      pipelineAdded: toPipeline ? listed.length : null,
+    });
     mkdirSync(OUTPUT_DIR, { recursive: true });
     writeFileSync(mdPath, reportMd, 'utf-8');
     writeFileSync(jsonPath, JSON.stringify(reportJson, null, 2), 'utf-8');
@@ -395,21 +424,49 @@ async function main(args = process.argv.slice(2)) {
     if (toPipeline && listed.length > 0) {
       await appendToPipeline(listed);
       await appendToScanHistory(listed, today, 'added');
-      pipelineAdded = listed.length;
       reportJson.pipeline = true;
-      log(`📥 Pipeline:  ${pipelineAdded} vagas novas em data/pipeline.md`);
+      log(`📥 Pipeline:  ${listed.length} vagas novas em data/pipeline.md`);
     }
-  } else {
-    log('\n(--dry-run: nada escrito)');
   }
+
+  return reportJson;
+}
+
+async function main(args = process.argv.slice(2)) {
+  const dryRun = hasFlag(args, '--dry-run');
+  const toPipeline = hasFlag(args, '--pipeline');
+  const jsonMode = hasFlag(args, '--json');
+  const limitRaw = flagValue(args, '--limit');
+  const limit = limitRaw ? Math.max(1, parseInt(limitRaw, 10) || 80) : 80;
+
+  const reportJson = await runPortugalScan({
+    limit,
+    writeFiles: !dryRun,
+    toPipeline: !dryRun && toPipeline,
+    quiet: jsonMode,
+  });
+
+  if (dryRun && !jsonMode) logDryRun();
+
+  const {
+    date: today,
+    admitted,
+    totalFetched,
+    uniqueFetched,
+    fetchedBySource,
+    errors,
+    searchLinks,
+    jobs: listed,
+  } = reportJson;
+  const skippedLabel = formatSkipCounts(reportJson.skipped || {});
 
   if (jsonMode) {
     console.log(JSON.stringify(reportJson, null, 2));
   } else {
     printScanSummaryHeader('Portugal Scan', today);
     console.log(`Fontes OK:          ${Object.keys(fetchedBySource).length - errors.length}/${Object.keys(fetchedBySource).length}`);
-    console.log(`Vagas brutas:       ${raw.length} (${unique.length} únicas)`);
-    console.log(`Admitidas:          ${admitted.length}${admitted.length > limit ? ` (a mostrar ${limit})` : ''}`);
+    console.log(`Vagas brutas:       ${totalFetched} (${uniqueFetched} únicas)`);
+    console.log(`Admitidas:          ${admitted}${admitted > listed.length ? ` (a mostrar ${listed.length})` : ''}`);
     if (skippedLabel) console.log(`Ignoradas:          ${skippedLabel}`);
     if (errors.length) console.log(`Erros de fonte:     ${errors.length}`);
     console.log(`Links manuais:      ${searchLinks.length} (LinkedIn, NetEmpregos, ITJobs…)`);
@@ -422,13 +479,17 @@ async function main(args = process.argv.slice(2)) {
       if (listed.length > 10) console.log(`  … e mais ${listed.length - 10} no relatório.`);
     }
     console.log('\nDica: npm run scan:portugal -- --pipeline   # envia as novas para data/pipeline.md');
-    console.log('      Depois avalia com: cola o URL ou pede "avalia esta".');
+    console.log('      Ou no site: Explore → Portugal boards → Pesquisar Portugal');
   }
 
   // Partial source failure is a soft warning; total wipe of every source is hard.
-  if (errors.length && errors.length === Object.keys(fetchedBySource).length && admitted.length === 0) {
+  if (errors.length && errors.length === Object.keys(fetchedBySource).length && admitted === 0) {
     process.exitCode = 1;
   }
+}
+
+function logDryRun() {
+  console.log('\n(--dry-run: nada escrito)');
 }
 
 if (isMainModule(import.meta.url)) {

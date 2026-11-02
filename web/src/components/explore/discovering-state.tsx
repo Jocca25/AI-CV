@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { ApplyBackdrop } from "@/components/apply/apply-backdrop";
 import { instrumentSerif } from "@/lib/fonts";
-import { ATS_LABEL, ATS_SOURCES, type AtsSource } from "@/lib/explore";
+import { ATS_LABEL, ATS_SOURCES, type AtsSource, type DiscoverySource } from "@/lib/explore";
+import { PORTUGAL_PRESET, PORTUGAL_SOURCES, PORTUGAL_SOURCE_LABEL } from "@/lib/portugal-preset.mjs";
 import { useExplore, type SourceState } from "./explore-provider";
 
 const STYLE = `
@@ -45,7 +46,15 @@ export function useCountUp(target: number): number {
   return Math.round(val);
 }
 
-function SourceChip({ ats, s }: { ats: AtsSource; s?: SourceState }) {
+function sourceLabel(id: string): string {
+  return (
+    ATS_LABEL[id as AtsSource] ??
+    PORTUGAL_SOURCE_LABEL[id as keyof typeof PORTUGAL_SOURCE_LABEL] ??
+    id
+  );
+}
+
+function SourceChip({ id, s }: { id: DiscoverySource | string; s?: SourceState }) {
   const state = s?.state ?? "queued";
   const pct = s?.total ? Math.min(100, Math.round(((s.done ?? 0) / s.total) * 100)) : state === "swept" || state === "noisy" ? 100 : 0;
   return (
@@ -57,7 +66,7 @@ function SourceChip({ ats, s }: { ats: AtsSource; s?: SourceState }) {
       ) : (
         <span className="size-2.5 rounded-full border border-current opacity-40" />
       )}
-      <span className="text-[13px] font-medium text-foreground">{ATS_LABEL[ats]}</span>
+      <span className="text-[13px] font-medium text-foreground">{sourceLabel(id)}</span>
       <div className="ml-auto flex flex-col items-end gap-1">
         {state === "noisy" && <span className="text-[10px] text-faint">~{s?.unreachable} skipped</span>}
         <div className="co-src__track">
@@ -69,9 +78,11 @@ function SourceChip({ ats, s }: { ats: AtsSource; s?: SourceState }) {
 }
 
 export function DiscoveringState() {
-  const { sources, matchCount, companiesScanned, status, phase } = useExplore();
+  const { sources, matchCount, companiesScanned, status, phase, filters } = useExplore();
   const shown = useCountUp(matchCount);
   const companies = useCountUp(companiesScanned);
+  const portugal = filters.preset === PORTUGAL_PRESET;
+  const chipIds = portugal ? PORTUGAL_SOURCES : ATS_SOURCES;
 
   return (
     <>
@@ -81,25 +92,35 @@ export function DiscoveringState() {
 
         <div className="co-ledger">
           <span className="size-1.5 rounded-full bg-emerald-500" />
-          0 tokens · $0.00 {companies > 0 && <span className="opacity-70">· {companies.toLocaleString()} companies</span>}
+          0 tokens · $0.00 {companies > 0 && <span className="opacity-70">· {companies.toLocaleString()} {portugal ? "sources" : "companies"}</span>}
         </div>
 
         <div>
           <div className={`${instrumentSerif.className} co-disc__counter text-foreground`}>{shown}</div>
           <p className="mt-1 text-sm text-muted">
-            {phase === "revealing" ? "fresh roles found — free" : matchCount > 0 ? "fresh roles and counting…" : "scanning the network…"}
+            {phase === "revealing"
+              ? portugal
+                ? "vagas encontradas — grátis"
+                : "fresh roles found — free"
+              : matchCount > 0
+                ? portugal
+                  ? "a encontrar vagas…"
+                  : "fresh roles and counting…"
+                : portugal
+                  ? "a pesquisar Portugal…"
+                  : "scanning the network…"}
           </p>
         </div>
 
         <div className="co-src">
-          {ATS_SOURCES.map((a) => (
-            <SourceChip key={a} ats={a} s={sources[a]} />
+          {chipIds.map((a) => (
+            <SourceChip key={a} id={a} s={sources[a as DiscoverySource]} />
           ))}
         </div>
 
         <p className="flex items-center gap-2 text-[13px] text-faint">
           <Loader2 className="size-3.5 animate-spin" />
-          {status || "Casting the net across the ATS network…"}
+          {status || (portugal ? "A procurar vagas em Portugal…" : "Casting the net across the ATS network…")}
         </p>
       </div>
     </>

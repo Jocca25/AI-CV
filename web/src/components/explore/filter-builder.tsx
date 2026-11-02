@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { ATS_LABEL, ATS_SOURCES, cleanChips, type AtsSource, type ExploreFilters } from "@/lib/explore";
 
 import { CHINA_PRESET, CHINA_SOURCES, EMPLOYER_LABEL } from "@/lib/employer-preset.mjs";
+import { PORTUGAL_PRESET } from "@/lib/portugal-preset.mjs";
 import type { EmployerSource } from "@/lib/explore";
 
 const RECENCY = [
@@ -116,6 +117,7 @@ export function FilterBuilder({
   disabled?: boolean;
 }) {
   const employer = filters.preset === CHINA_PRESET;
+  const portugal = filters.preset === PORTUGAL_PRESET;
   const [advanced, setAdvanced] = useState(false);
   const set = (patch: Partial<ExploreFilters>) => onChange({ ...filters, ...patch });
   const toggleAts = (a: AtsSource) => {
@@ -130,10 +132,20 @@ export function FilterBuilder({
       <fieldset>
         <legend className="mb-1.5 text-[13px] font-medium">Discovery sources</legend>
         <div className="flex flex-wrap gap-4 text-sm">
-          <label className="inline-flex items-center gap-2"><input type="radio" name="explore-preset" checked={!employer} onChange={() => set({ preset: undefined })} />Public ATS network</label>
+          <label className="inline-flex items-center gap-2"><input type="radio" name="explore-preset" checked={!employer && !portugal} onChange={() => set({ preset: undefined })} />Public ATS network</label>
+          <label className="inline-flex items-center gap-2"><input type="radio" name="explore-preset" checked={portugal} onChange={() => set({ preset: PORTUGAL_PRESET, employers: undefined })} />Portugal boards</label>
           <label className="inline-flex items-center gap-2"><input type="radio" name="explore-preset" checked={employer} onChange={() => set({ preset: CHINA_PRESET, employers: [...CHINA_SOURCES] as EmployerSource[] })} />China employer preset</label>
         </div>
       </fieldset>
+      {portugal && (
+        <fieldset aria-describedby="portugal-scope">
+          <legend className="mb-2 text-[13px] font-medium">Portugal multi-site</legend>
+          <p id="portugal-scope" className="text-xs text-muted">
+            Pesquisa Landing.jobs, OkEmprego e boards remotos, filtrados para Portugal (Lisboa/Porto…) e os teus títulos em <code className="text-[11px]">portals.yml</code>.
+            LinkedIn, NetEmpregos e ITJobs aparecem como links para abrires no browser — sem scrape. Grátis, zero tokens.
+          </p>
+        </fieldset>
+      )}
       {employer && <fieldset aria-describedby="employer-scope employer-selection">
         <legend className="mb-2 text-[13px] font-medium">Employers</legend>
         <div className="flex flex-wrap gap-4">{CHINA_SOURCES.map(id => <label key={id} className="inline-flex items-center gap-2 text-sm">
@@ -143,6 +155,8 @@ export function FilterBuilder({
         <p id="employer-scope" className="mt-2 text-xs text-muted">Employer selection does not guarantee mainland-China, technical or experienced-hire eligibility. Check the original JD. Role and location terms are optional; unknown locations may remain, and remote titles may match. Locations are term filters, not eligibility checks. No posting-date cutoff applies. Other ATS filters are inactive for this preset. Coverage is limited to 10 pages per employer; limits or source problems are reported as incomplete.</p>
       </fieldset>}
 
+      {!portugal && (
+        <>
       <div>
         <Label hint={filters.positive.length === 0 ? (employer ? "empty = all titles" : "empty = every fresh posting") : undefined}>Roles to find</Label>
         <KeywordField ariaLabel="Roles to find" values={filters.positive} tone="inc" placeholder="AI platform, ML infrastructure, staff engineer…" onChange={(v) => set({ positive: v })} />
@@ -258,6 +272,8 @@ export function FilterBuilder({
             />
           </div>
         </div>
+      )}
+        </>
       )}
     </fieldset>
   );

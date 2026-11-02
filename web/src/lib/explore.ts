@@ -5,7 +5,14 @@
 // writing temp files) lives in lib/core/{scan,portals,pipeline}.ts.
 
 export type EmployerSource = "tencent" | "bytedance" | "meituan";
-export type DiscoverySource = AtsSource | EmployerSource;
+export type PortugalSource =
+  | "landingjobs"
+  | "okemprego"
+  | "arbeitnow"
+  | "remoteok"
+  | "remotive"
+  | "himalayas";
+export type DiscoverySource = AtsSource | EmployerSource | PortugalSource;
 export type EmployerScanOutcome = { state: "complete" | "partial" | "failed"; message: string };
 export type AtsSource = "greenhouse" | "lever" | "ashby" | "workday";
 export const ATS_SOURCES: AtsSource[] = ["greenhouse", "lever", "ashby", "workday"];
@@ -20,7 +27,7 @@ export const ATS_LABEL: Record<AtsSource, string> = {
  *  buildTitleFilter / buildLocationFilter semantics; sinceDays/ats/limitPerAts map
  *  to scan-ats-full.mjs's --since / --ats / --limit. */
 export type ExploreFilters = {
-  preset?: "china-employers";
+  preset?: "china-employers" | "portugal";
   employers?: EmployerSource[];
   positive: string[];
   negative: string[];
@@ -32,6 +39,9 @@ export type ExploreFilters = {
   ats: AtsSource[];
   limitPerAts: number;
 };
+
+/** Manual board search links (LinkedIn etc.) — never scraped; open in browser. */
+export type SearchLink = { name: string; url: string; note?: string };
 
 export const DEFAULT_FILTERS: ExploreFilters = {
   positive: [],
@@ -109,6 +119,7 @@ export type ScanEvent =
       employerOutcome?: EmployerScanOutcome;
       employerSources?: { id: string; state: string; reason?: string }[];
     }
+  | { kind: "searchLinks"; links: SearchLink[] }
   | { kind: "log"; line: string }
   | { kind: "error"; message: string }
   | { kind: "done"; count: number; offers: DiscoveredOffer[]; cost?: { tokens: number; usd: number } };
@@ -144,6 +155,7 @@ export function parseExplorePatch(
 ): ExploreFilters {
   const next: ExploreFilters = { ...base, ats: [...base.ats] };
   if (raw.preset === "china-employers") next.preset = "china-employers";
+  else if (raw.preset === "portugal") next.preset = "portugal";
   else if (raw.preset !== undefined) next.preset = undefined;
   if (raw.employers !== undefined && Array.isArray(raw.employers)) {
     next.employers = [...new Set(raw.employers.filter((id): id is EmployerSource => ["tencent", "bytedance", "meituan"].includes(String(id))))];
@@ -175,6 +187,8 @@ export function filtersToParams(f: ExploreFilters): string {
   if (f.preset === "china-employers") {
     sp.set("preset", f.preset);
     sp.set("employers", (f.employers ?? []).join(","));
+  } else if (f.preset === "portugal") {
+    sp.set("preset", f.preset);
   }
   if (f.positive.length) sp.set("q", f.positive.join(","));
   if (f.negative.length) sp.set("not", f.negative.join(","));

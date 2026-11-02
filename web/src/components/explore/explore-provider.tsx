@@ -16,8 +16,10 @@ import {
   type ExploreFilters,
   type ExploreMode,
   type ScanEvent,
+  type SearchLink,
 } from "@/lib/explore";
 import { CHINA_PRESET, EMPLOYER_LABEL, employerRequest } from "@/lib/employer-preset.mjs";
+import { PORTUGAL_PRESET, PORTUGAL_SOURCES, portugalRequest } from "@/lib/portugal-preset.mjs";
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
 import { isAbortError, isScannerMissing } from "@/lib/explore-error.mjs";
@@ -56,6 +58,8 @@ type ExploreCtx = {
   phase: Phase;
   running: boolean;
   offers: DiscoveredOffer[];
+  /** Manual search deep-links (LinkedIn…) from the Portugal preset — never scraped. */
+  searchLinks: SearchLink[];
   sources: Partial<Record<DiscoverySource, SourceState>>;
   matchCount: number;
   companiesScanned: number;
@@ -136,6 +140,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const touched = useRef(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [offers, setOffers] = useState<DiscoveredOffer[]>([]);
+  const [searchLinks, setSearchLinks] = useState<SearchLink[]>([]);
   const [sources, setSources] = useState<Partial<Record<DiscoverySource, SourceState>>>({});
   const [matchCount, setMatchCount] = useState(0);
   const [companiesScanned, setCompaniesScanned] = useState(0);
@@ -177,7 +182,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     const f = filtersRef.current;
     if (f.preset === CHINA_PRESET && !f.employers?.length) return;
     const employer = f.preset === CHINA_PRESET;
-    if (employer) {
+    const portugal = f.preset === PORTUGAL_PRESET;
+    if (employer || portugal) {
       try { sessionStorage.removeItem(RESULTS_KEY); } catch { /* unavailable */ }
     }
     const run = runs.current.start();
@@ -185,6 +191,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setPhase("casting");
     setEmployerOutcome(null);
     setOffers([]);
+    setSearchLinks([]);
     setMatchCount(0);
     setCompaniesScanned(0);
     setCompaniesAvailable(0);
@@ -193,9 +200,18 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setPartial(false);
     setError("");
     setScannerMissing(false);
-    setStatus("Casting the net across the ATS network…");
+    setStatus(
+      portugal
+        ? "A procurar vagas em Portugal (Landing.jobs, OkEmprego…)"
+        : "Casting the net across the ATS network…",
+    );
     const init: Partial<Record<DiscoverySource, SourceState>> = {};
-    for (const a of employer ? f.employers ?? [] : f.ats) init[a] = { state: "queued" };
+    const sourceIds = portugal
+      ? PORTUGAL_SOURCES
+      : employer
+        ? f.employers ?? []
+        : f.ats;
+    for (const a of sourceIds) init[a as DiscoverySource] = { state: "queued" };
     setSources(init);
     // Do not write the filter URL here. Next.js patches history.replaceState and
     // treats it as a navigation, which aborts this fetch — Discover flashed
@@ -260,6 +276,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
           if (ev.unreachable > 0 || datasetIssue) setPartial(true);
           break;
         }
+        case "searchLinks":
+          if (Array.isArray(ev.links)) setSearchLinks(ev.links);
+          break;
         case "error":
           sawError = ev.message;
           break;
@@ -271,7 +290,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     try {
       // Next.js patches window.fetch and aborts it on any router/history update.
       // Discover died in ~100ms with a silent AbortError. XMLHttpRequest is not patched.
-      const { status, errorBody } = await postNdjsonXhr("/api/explore", employer ? employerRequest(f) : f, handleEvent);
+      const body = portugal ? portugalRequest(f) : employer ? employerRequest(f) : f;
+      const { status, errorBody } = await postNdjsonXhr("/api/explore", body, handleEvent);
       if (status >= 400) {
         sawScannerMissing = isScannerMissing(errorBody);
         const msg =
@@ -446,6 +466,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setPhase("idle");
     setEmployerOutcome(null);
     setOffers([]);
+    setSearchLinks([]);
     setSources({});
     setMatchCount(0);
     setCompaniesScanned(0);
@@ -660,11 +681,11 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     () => ({
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
-      offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, employerOutcome, partial, error, scannerMissing, added, adding,
+      offers, searchLinks, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, employerOutcome, partial, error, scannerMissing, added, adding,
       discover, loadFresh, addToPipeline, applyPatch, reset,
       mode, setMode, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, employerOutcome, partial, error, scannerMissing, added, adding, discover, loadFresh, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, searchLinks, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, employerOutcome, partial, error, scannerMissing, added, adding, discover, loadFresh, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

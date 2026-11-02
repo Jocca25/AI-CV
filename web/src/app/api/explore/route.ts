@@ -2,7 +2,9 @@ import { NextRequest } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { employerRequest, CHINA_PRESET } from "@/lib/employer-preset.mjs";
+import { PORTUGAL_PRESET, portugalRequest, PORTUGAL_SOURCES } from "@/lib/portugal-preset.mjs";
 import { runEmployerDiscovery } from "@/lib/core/employer-discovery.mjs";
+import { runPortugalDiscovery } from "@/lib/core/portugal-discovery.mjs";
 import { runDiscovery } from "@/lib/core/scan";
 import { rootScript } from "@/lib/career-ops";
 import { parseExplorePatch, DEFAULT_FILTERS, type DiscoveredOffer, type ScanEvent } from "@/lib/explore";
@@ -19,10 +21,17 @@ export async function POST(req: NextRequest) {
   const body = (await readJsonObject(req)) ?? {};
 
   const employer = body.preset === CHINA_PRESET;
+  const portugal = body.preset === PORTUGAL_PRESET;
   // Validate the raw source selection before the forgiving legacy filter codec.
-  if (body.preset && !employer) return Response.json({ error: "Unknown discovery preset." }, { status: 400 });
+  if (body.preset && !employer && !portugal) {
+    return Response.json({ error: "Unknown discovery preset." }, { status: 400 });
+  }
   if (employer) {
     try { employerRequest(body); }
+    catch (e) { return Response.json({ error: e instanceof Error ? e.message : "Invalid sources" }, { status: 400 }); }
+  }
+  if (portugal) {
+    try { portugalRequest(body); }
     catch (e) { return Response.json({ error: e instanceof Error ? e.message : "Invalid sources" }, { status: 400 }); }
   }
   const filters = parseExplorePatch(body, DEFAULT_FILTERS);
@@ -30,7 +39,8 @@ export async function POST(req: NextRequest) {
   // Guard: a data-only checkout (or pre-onboarding) has no scanner. Fail soft.
   // The body carries an explicit code because 400 is a shared channel: the
   // client cannot tell this apart from a malformed request by status alone.
-  if (!fs.existsSync(rootScript(employer ? "scan" : "scan-ats-full"))) {
+  const needed = portugal ? "scan-portugal" : employer ? "scan" : "scan-ats-full";
+  if (!fs.existsSync(rootScript(needed))) {
     return Response.json(scannerMissingBody(), { status: SCANNER_MISSING_STATUS });
   }
 
@@ -47,12 +57,34 @@ export async function POST(req: NextRequest) {
           /* stream closed */
         }
       };
-      send({ kind: "start", ats: employer ? filters.employers ?? [] : filters.ats, sinceDays: employer ? 0 : filters.sinceDays, limit: employer ? 0 : filters.limitPerAts, free: true } satisfies ScanEvent);
+      const startAts = portugal
+        ? [...PORTUGAL_SOURCES]
+        : employer
+          ? filters.employers ?? []
+          : filters.ats;
+      send({
+        kind: "start",
+        ats: startAts,
+        sinceDays: employer || portugal ? 0 : filters.sinceDays,
+        limit: employer || portugal ? 0 : filters.limitPerAts,
+        free: true,
+      } satisfies ScanEvent);
       let offers: DiscoveredOffer[] = [];
       try {
-        offers = employer
-          ? await runEmployerDiscovery(body, { codeRoot: path.dirname(rootScript("scan")), signal: abort.signal, onEvent: (e: ScanEvent) => send(e) })
-          : await runDiscovery(filters, (e: ScanEvent) => send(e));
+        if (portugal) {
+          offers = (await runPortugalDiscovery(body, {
+            signal: abort.signal,
+            onEvent: (e: ScanEvent) => send(e),
+          })) as DiscoveredOffer[];
+        } else if (employer) {
+          offers = await runEmployerDiscovery(body, {
+            codeRoot: path.dirname(rootScript("scan")),
+            signal: abort.signal,
+            onEvent: (e: ScanEvent) => send(e),
+          });
+        } else {
+          offers = await runDiscovery(filters, (e: ScanEvent) => send(e));
+        }
       } catch (err) {
         send({ kind: "error", message: err instanceof Error ? err.message : "discovery failed" } satisfies ScanEvent);
       }
